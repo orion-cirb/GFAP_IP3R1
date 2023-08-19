@@ -42,12 +42,7 @@
             <main-class>GFAP_IP3R1</main-class>
 	</properties>
         
-        <scm>
-            <connection>scm:git:git://github.com/orion-cirb/GFAP_IP3R1.jar</connection>
-            <developerConnection>scm:git:git@github.com:orion-cirb/GFAP_IP3R1.jar</developerConnection>
-            <tag>HEAD</tag>
-            <url>https://github.com/orion-cirb/GFAP_IP3R1.jar</url>
-	</scm>
+       
         
 	<dependencies>
             <dependency>
