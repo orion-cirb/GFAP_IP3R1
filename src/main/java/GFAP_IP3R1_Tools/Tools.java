@@ -1,17 +1,17 @@
 package GFAP_IP3R1_Tools;
 
-
 import fiji.util.gui.GenericDialogPlus;
 import ij.IJ;
 import ij.ImagePlus;
+import ij.gui.PolygonRoi;
 import ij.gui.Roi;
-import ij.gui.WaitForUserDialog;
 import ij.io.FileSaver;
 import ij.measure.Calibration;
-import ij.plugin.Duplicator;
+import ij.measure.ResultsTable;
+import ij.plugin.ImageCalculator;
 import ij.plugin.RGBStackMerge;
-import ij.plugin.filter.ThresholdToSelection;
-import ij.process.ImageProcessor;
+import ij.plugin.filter.Analyzer;
+import ij.process.AutoThresholder;
 import java.awt.Color;
 import java.awt.Font;
 import java.io.File;
@@ -27,7 +27,6 @@ import loci.common.services.ServiceException;
 import loci.formats.FormatException;
 import loci.formats.meta.IMetadata;
 import loci.plugins.util.ImageProcessorReader;
-import mcib3d.geom.Objects3DPopulation;
 import mcib3d.geom2.Object3DInt;
 import mcib3d.geom2.Objects3DIntPopulation;
 import mcib3d.geom2.measurements.MeasureVolume;
@@ -39,24 +38,40 @@ import net.haesleinhuepf.clij2.CLIJ2;
 import org.apache.commons.io.FilenameUtils;
 
 
-
+/**
+ * @author Philippe Mailly & Héloïse Monnet
+ */
 public class Tools {
-        
-    // min size for objects
-    public double minDots = 0.5;
-    public double minAstro = 5;
-    // max size for objects
-    public final double maxDots = Double.MAX_VALUE;
-    public final double maxAstro = Double.MAX_VALUE;
-    public Calibration cal = new Calibration();
-    public double pixVol;
+    
     public final ImageIcon icon = new ImageIcon(this.getClass().getResource("/Orion_icon.png"));
+    private final String helpUrl = "https://github.com/orion-cirb/GFAP_IP3R1";
     
     private final CLIJ2 clij2 = CLIJ2.getInstance();
     
-     /**
-     * check  installed modules
-     * @return 
+    String[] chNames = {"GFAP astrocytes", "IP3R1 dots"};
+    public Calibration cal = new Calibration();
+    public double pixVol;
+    
+    // Astrocytes detection
+    public String astroThMethod = "Triangle";
+    public double minAstroVol = 2;
+    
+    // Dots detection
+    public String dotsThMethod = "Otsu";
+    public double minDotsVol = 0.02;
+    
+    
+    /**
+     * Display a message in the ImageJ console and status bar
+     */
+    public void print(String log) {
+        System.out.println(log);
+        IJ.showStatus(log);
+    }
+    
+    
+    /**
+     * Check that needed modules are installed
      */
     public boolean checkInstalledModules() {
         // check install
@@ -70,16 +85,20 @@ public class Tools {
         return true;
     }
     
-     /**
+    
+    /**
      * Find images extension
      */
-    public String findImageType(File imagesFolder) {
+    public String findImageType(String imagesFolder) {
         String ext = "";
-        String[] files = imagesFolder.list();
+        String[] files = new File(imagesFolder).list();
         for (String name : files) {
             String fileExt = FilenameUtils.getExtension(name);
             switch (fileExt) {
-               case "nd" :
+                case "nd" :
+                   ext = fileExt;
+                   break;
+                case "nd2" :
                    ext = fileExt;
                    break;
                 case "czi" :
@@ -109,74 +128,55 @@ public class Tools {
     }
 
         
-   /**
+    /**
      * Find images in folder
      */
     public ArrayList findImages(String imagesFolder, String imageExt) {
         File inDir = new File(imagesFolder);
         String[] files = inDir.list();
         if (files == null) {
-            System.out.println("No Image found in "+imagesFolder);
+            System.out.println("No image found in "+imagesFolder);
             return null;
         }
         ArrayList<String> images = new ArrayList();
         for (String f : files) {
             // Find images with extension
             String fileExt = FilenameUtils.getExtension(f);
-            if (fileExt.equals(imageExt))
+            if (fileExt.equals(imageExt) && !f.startsWith("."))
                 images.add(imagesFolder + f);
         }
         Collections.sort(images);
         return(images);
     }
     
-    /**
-     * Dialog
-     */
-    public String[] dialog(String imagesDir, String[] channels) {
-        String[] chNames = {"Astrocyte : ", "IP3R1 : "};
-        GenericDialogPlus gd = new GenericDialogPlus("Parameters");
-        gd.setInsets​(0, 15, 0);
-        gd.addImage(icon);
-        gd.addMessage("Channels selection", Font.getFont("Monospace"), Color.blue);
-        for (int n = 0; n < chNames.length; n++) {
-            gd.addChoice(chNames[n], channels, channels[n]);
-        }
-        gd.addMessage("Size filter", Font.getFont("Monospace"), Color.blue);
-        gd.addNumericField("Min astrocyte size (µm3) : ", minAstro, 2);
-        gd.addNumericField("Min dots size (µm3) : ", minDots, 2);
-        gd.addMessage("Image calibration", Font.getFont("Monospace"), Color.blue);
-        gd.addNumericField("xy calibration (µm)", cal.pixelHeight,3);
-        gd.addNumericField("z calibration (µm)", cal.pixelDepth,3);
-        gd.showDialog();
-        String[] chChoices = new String[chNames.length];
-        for (int n = 0; n < chChoices.length; n++) 
-            chChoices[n] = gd.getNextChoice();
-        if (gd.wasCanceled())
-                chChoices = null;
-        minAstro = gd.getNextNumber();
-        minDots = gd.getNextNumber();
-        cal.pixelHeight = gd.getNextNumber();
-        cal.pixelWidth = cal.pixelHeight;
-        cal.pixelDepth = gd.getNextNumber();
-        pixVol = cal.pixelHeight*cal.pixelWidth*cal.pixelDepth;
-        return(chChoices);
-    } 
     
-     /**
-     * Find channels name and None to end of list
-     * @param imageName
-     * @param meta
-     * @param reader
-     * @return 
+    /**
+     * Find image calibration
+     */
+    public Calibration findImageCalib(IMetadata meta) {
+        // read image calibration
+        cal.pixelWidth = meta.getPixelsPhysicalSizeX(0).value().doubleValue();
+        cal.pixelHeight = cal.pixelWidth;
+        if (meta.getPixelsPhysicalSizeZ(0) != null)
+            cal.pixelDepth = meta.getPixelsPhysicalSizeZ(0).value().doubleValue();
+        else
+            cal.pixelDepth = 1;
+        cal.setUnit("microns");
+        System.out.println("XY calibration = " + cal.pixelWidth + ", Z calibration = " + cal.pixelDepth);
+        return(cal);
+    }
+    
+    
+    /**
+     * Find channels name
      * @throws loci.common.services.DependencyException
      * @throws loci.common.services.ServiceException
      * @throws loci.formats.FormatException
      * @throws java.io.IOException
      */
-    public String[] findChannels (String imageName, IMetadata meta, ImageProcessorReader reader) throws DependencyException, ServiceException, FormatException, IOException {
+    public String[] findChannels(String imageName, IMetadata meta, ImageProcessorReader reader) throws DependencyException, ServiceException, FormatException, IOException {
         int chs = reader.getSizeC();
-        String[] channels = new String[chs+1];
+        String[] channels = new String[chs];
         String imageExt =  FilenameUtils.getExtension(imageName);
         switch (imageExt) {
             case "nd" :
@@ -210,154 +210,122 @@ public class Tools {
                 for (int n = 0; n < chs; n++)
                     channels[n] = Integer.toString(n);
         }
-        channels[chs] = "None";
         return(channels);     
     }
     
-
-    public void setCalibration(ImagePlus imp) {
-        imp.setCalibration(cal);
-    }
-     
-    /**
-     * Find image calibration
-     * @param meta
-     * @return 
-     */
-    public Calibration findImageCalib(IMetadata meta) {
-        // read image calibration
-        cal.pixelWidth = meta.getPixelsPhysicalSizeX(0).value().doubleValue();
-        cal.pixelHeight = cal.pixelWidth;
-        if (meta.getPixelsPhysicalSizeZ(0) != null)
-            cal.pixelDepth = meta.getPixelsPhysicalSizeZ(0).value().doubleValue();
-        else
-            cal.pixelDepth = 1;
-        cal.setUnit("microns");
-        System.out.println("x cal = " +cal.pixelWidth+", z cal=" + cal.pixelDepth);
-        return(cal);
-    }
-    
-      public Objects3DIntPopulation getPopFromImage(ImagePlus img) {
-        // label binary images first
-        ImageLabeller labeller = new ImageLabeller();
-        ImageInt labels = labeller.getLabels(ImageHandler.wrap(img));
-        labels.setCalibration(cal);
-        Objects3DIntPopulation pop = new Objects3DIntPopulation(labels);
-        return pop;
-    }
-      
-      /**
-     * Remove object with size < min and size > max
-     * @param pop
-     * @param min
-     * @param max
-     */
-    public void popFilterSize(Objects3DIntPopulation pop, double min, double max) {
-        pop.setVoxelSizeXY(cal.pixelWidth);
-        pop.setVoxelSizeZ(cal.pixelDepth);
-        pop.getObjects3DInt().removeIf(p -> (new MeasureVolume(p).getVolumeUnit() < min) || (new MeasureVolume(p).getVolumeUnit() > max));
-        pop.resetLabels();
-    }
-      
-    /**
-     * 3D Median filter using CLIJ2
-     * @param img
-     * @param sizeXY
-     * @param sizeZ
-     * @return 
-     */ 
-    public ImagePlus median3D_filter(ImagePlus img, double sizeXY, double sizeZ) {
-       ClearCLBuffer imgCL = clij2.push(img); 
-       ClearCLBuffer imgCLMed = clij2.create(imgCL);
-       clij2.median3DBox(imgCL, imgCLMed, sizeXY, sizeXY, sizeZ);
-       clij2.release(imgCL);
-       ImagePlus imgMed = clij2.pull(imgCLMed);
-        clij2.release(imgCLMed);
-       return(imgMed);
-    }
     
     /**
-     *
-     * @param img
+     * Generate dialog box
      */
-    public void closeImages(ImagePlus img) {
+    public String[] dialog(String imagesDir, String[] channels) {
+        GenericDialogPlus gd = new GenericDialogPlus("Parameters");
+        gd.setInsets​(0, 60, 0);
+        gd.addImage(icon);
+        
+        gd.addMessage("Channels", Font.getFont("Monospace"), Color.blue);
+        int index = 0;
+        for (String chName: chNames) {
+            gd.addChoice(chName+": ", channels, channels[index]);
+            index++;
+        }
+        
+        String[] thMethods = AutoThresholder.getMethods();
+        gd.addMessage("Astrocytes detection", Font.getFont("Monospace"), Color.blue);
+        gd.addChoice("Threshold method: ", thMethods, astroThMethod);
+        gd.addNumericField("Min volume (µm3): ", minAstroVol, 2);
+        
+        gd.addMessage("Dots detection", Font.getFont("Monospace"), Color.blue);
+        gd.addChoice("Threshold method: ", thMethods, dotsThMethod);
+        gd.addNumericField("Min volume (µm3): ", minDotsVol, 2);
+        
+        gd.addMessage("Image calibration", Font.getFont("Monospace"), Color.blue);
+        gd.addNumericField("XY calibration (µm): ", cal.pixelHeight, 3);
+        gd.addNumericField("Z calibration (µm): ", cal.pixelDepth, 3);
+        gd.addHelp(helpUrl);
+        gd.showDialog();
+        
+        String[] chChoices = new String[chNames.length];
+        for (int n = 0; n < chChoices.length; n++) 
+            chChoices[n] = gd.getNextChoice();
+        
+        astroThMethod = gd.getNextChoice();
+        minAstroVol = gd.getNextNumber();
+        
+        dotsThMethod = gd.getNextChoice();
+        minDotsVol = gd.getNextNumber();
+        
+        cal.pixelHeight = cal.pixelWidth = gd.getNextNumber();
+        cal.pixelDepth = gd.getNextNumber();
+        pixVol = cal.pixelHeight*cal.pixelWidth*cal.pixelDepth;
+        
+        if (gd.wasCanceled())
+            chChoices = null;
+        return(chChoices);
+    }
+    
+    
+    /**
+     * Flush and close an image
+     */
+    public void closeImage(ImagePlus img) {
         img.flush();
         img.close();
     }
+
+       
+    /**
+     * Detect astrocytes
+     */
+    public Objects3DIntPopulation detectAstrocytes(ImagePlus imgIn, ArrayList<Roi> rois) {
+        ImagePlus imgMed = median2D(imgIn, 4);
+        ImagePlus imgBin = threshold(imgMed, astroThMethod);
+        imgBin.setCalibration(cal);
+        
+        // Fill ROIs in black
+        if (!rois.isEmpty())
+            fillImg(imgBin, rois);
+        
+        Objects3DIntPopulation astroPop = getPopFromImage(imgBin);
+        System.out.println("Nb astrocytic objects detected:"+astroPop.getNbObjects());
+        popFilterSize(astroPop, minAstroVol, Double.MAX_VALUE);
+        System.out.println("Nb astrocytic objects remaining after size filtering: "+ astroPop.getNbObjects());
+        
+        closeImage(imgMed);
+        closeImage(imgBin);
+        
+        return(astroPop);
+    }
     
     
     /**
-     * Save images
-     * @param astroObj
-     * @param dotsInsideGFAP
-     * @param dotsOutsideGFAP
-     * @param imgs
-     * @return  
-     */
-    public void saveImageObjects(Object3DInt astroObj, Objects3DIntPopulation dotsInsideGFAP, Objects3DIntPopulation dotsOutsideGFAP, 
-            ImagePlus imgAstro, ImagePlus imgDots, String name) {
-        ImageHandler imhAstro = ImageHandler.wrap(imgAstro).createSameDimensions();
-        astroObj.drawObject(imhAstro);
-        ImageHandler imhDotsInside = imhAstro.createSameDimensions();
-        dotsInsideGFAP.drawInImage(imhDotsInside);
-        ImageHandler imhDotsOutside = imhAstro.createSameDimensions();
-        dotsOutsideGFAP.drawInImage(imhDotsOutside);
-        ImagePlus[] imgColors = {imhAstro.getImagePlus(), imhDotsInside.getImagePlus(), imhDotsOutside.getImagePlus(), imgAstro, imgDots};
-        ImagePlus imgObjects = new RGBStackMerge().mergeHyperstacks(imgColors, false);
-        imgObjects.setCalibration(imgAstro.getCalibration());
-        FileSaver ImgObjectsFile = new FileSaver(imgObjects);
-        ImgObjectsFile.saveAsTiff(name); 
-        imhAstro.closeImagePlus();
-        imhDotsInside.closeImagePlus();
-        imhDotsOutside.closeImagePlus();
-    }
-    
-    /**
-     * Reset labels of the objects composing a population
-     * @param pop
-     */
-    public void resetLabels(Objects3DPopulation pop) {
-        for(int i=0; i < pop.getNbObjects(); i++) {
-            pop.getObject(i).setValue(i+1);
-        }
-    }
-    
-     /**
-     * Difference of Gaussians 
-     * Using CLIJ2
-     * @param img
-     * @param size1
-     * @param size2
-     * @return imgGauss
+     * 2D median filtering using CLIJ2
      */ 
-    public ImagePlus DOG(ImagePlus img, double size1, double size2) {
-        ClearCLBuffer imgCL = clij2.push(img);
-        ClearCLBuffer imgCLDOG = clij2.create(imgCL);
-        clij2.differenceOfGaussian3D(imgCL, imgCLDOG, size1, size1, size1, size2, size2, size2);
-        clij2.release(imgCL);
-        ImagePlus imgDOG = clij2.pull(imgCLDOG);
-        clij2.release(imgCLDOG);
-        return(imgDOG);
+    public ImagePlus median2D(ImagePlus img, double sizeXY) {
+       ClearCLBuffer imgCL = clij2.push(img); 
+       ClearCLBuffer imgCLMed = clij2.create(imgCL);
+       clij2.median3DSliceBySliceBox(imgCL, imgCLMed, sizeXY, sizeXY);
+       ImagePlus imgMed = clij2.pull(imgCLMed);
+       clij2.release(imgCL);
+       clij2.release(imgCLMed);
+       return(imgMed);
     }
     
+    
     /**
-     * Threshold 
-     * USING CLIJ2
-     * @param img
-     * @param thMed
-     * @return 
+     * Automatic thresholding using CLIJ2
      */
     public ImagePlus threshold(ImagePlus img, String thMed) {
         ClearCLBuffer imgCL = clij2.push(img);
         ClearCLBuffer imgCLBin = clij2.create(imgCL);
         clij2.automaticThreshold(imgCL, imgCLBin, thMed);
-        clij2.release(imgCL);
         ImagePlus imgBin = clij2.pull(imgCLBin);
+        clij2.release(imgCL);
         clij2.release(imgCLBin);
         return(imgBin);
     }
     
-     /**
+      
+    /**
      * Fill ROIs in black in image
      */
     public ImagePlus fillImg(ImagePlus img, ArrayList<Roi> rois) {
@@ -373,109 +341,113 @@ public class Tools {
         return(img);
     } 
     
-    /**
-     * Find Astrocyte with DOG and threshold
-     * @param imgIn
-     * @param rois
-     * @return 
-     */
-    public Object3DInt detectAstrocyte(ImagePlus imgIn, ArrayList<Roi> rois) {
-        ImagePlus imgDOG = DOG(imgIn, 4, 6);
-        ImagePlus imgBin = threshold(imgDOG, "Triangle");
-        // Fill ROIs in black
-        if (!rois.isEmpty()) {
-            fillImg(imgBin, rois);
-        }
-        closeImages(imgDOG);
-        imgBin.setCalibration(cal);
-        ImageLabeller labeller = new ImageLabeller();
-        ImageInt labels = labeller.getLabels(ImageHandler.wrap(imgBin));
-        closeImages(imgBin);
-        Objects3DIntPopulation astroPop = new Objects3DIntPopulation(labels);
-        labels.closeImagePlus();
-        System.out.println(astroPop.getNbObjects()+" astrocytes before size filtering");
-        popFilterSize(astroPop, minAstro, maxAstro);
-        System.out.println(astroPop.getNbObjects()+" astrocytes after size filtering");
-        // get pop as one 3D Object
-        ImageHandler imhAstro = ImageHandler.wrap(imgIn).createSameDimensions();
-        for (Object3DInt obj : astroPop.getObjects3DInt())
-            obj.drawObject(imhAstro, 255);
-        Object3DInt astroObj = new Object3DInt(imhAstro); 
-        return(astroObj);
-    }
-    
-    /*
-    Detect dots population
-    */
-    public Objects3DIntPopulation detectDots(ImagePlus imgIn, ArrayList<Roi> rois) {
-        ImagePlus imgDog = DOG(imgIn, 2, 4);
-        ImagePlus imgBin = threshold(imgDog, "Moments");
-        closeImages(imgDog);
-        // Fill ROIs in black
-        if (!rois.isEmpty()) {
-            fillImg(imgBin, rois);
-        }
-        imgBin.setCalibration(cal);
-        ImageLabeller labeller = new ImageLabeller();
-        ImageInt labels = labeller.getLabels(ImageHandler.wrap(imgBin));
-        closeImages(imgBin);
-        Objects3DIntPopulation dotsPop = new Objects3DIntPopulation(labels);
-        labels.closeImagePlus();
-        System.out.println(dotsPop.getNbObjects()+" IP3R1 dots before size filtering");
-        popFilterSize(dotsPop, minDots, maxDots);
-        System.out.println(dotsPop.getNbObjects()+" IP3R1 dots after size filtering");
-        return(dotsPop);
-    }
-    
-    public ImagePlus fillOutsideObj(Object3DInt obj, ImagePlus img) {
-        //IJ.setForegroundColor(0, 0, 0);
-        ImagePlus imgFill = new Duplicator().run(img);
-        ImageHandler imh = ImageHandler.wrap(img).createSameDimensions();
-        obj.drawObject(imh, 255);
-        ThresholdToSelection tts = new ThresholdToSelection();
-        ImagePlus mask = imh.getImagePlus();
-        for (int z = 1; z <= img.getNSlices(); z++) {
-            mask.setSlice(z);
-            IJ.setAutoThreshold(mask, "Default dark no-reset");            
-            tts.setup("", mask);
-            tts.run(mask);
-            Roi roi = tts.convert(mask.getProcessor());
-            imgFill.setSlice(z);
-            imgFill.setRoi(roi);
-            IJ.run(imgFill, "Clear", "slice");
-            imgFill.updateAndDraw();
-        }
-        closeImages(mask);
-        imh.closeImagePlus();
-        return(imgFill);
-    }
     
     /**
-     * Find dots inside and outside of astrocytes
-     * @param dotsPop
-     * @param astroObj
-     * @param img
-     * @return 
+     * Return population of 3D objects population from binary image
      */
-    public List<Objects3DIntPopulation> findDotsInOutAstro(Objects3DIntPopulation dotsPop, Object3DInt astroObj, ImagePlus imgAstro) {
-        // dots outside
-        ImageHandler imhDots = ImageHandler.wrap(imgAstro).createSameDimensions();
-        dotsPop.drawInImage(imhDots);
-        ImageHandler imhDotsOut = imhDots.duplicate();
-        ImagePlus imgDotsDraw = imhDots.getImagePlus();
-        astroObj.drawObject(imhDotsOut, 0);
-        Objects3DIntPopulation popOut = new Objects3DIntPopulation(imhDotsOut);
-        // dots inside
-        ImagePlus imgFill = fillOutsideObj(astroObj, imgDotsDraw);
-        Objects3DIntPopulation popIn = new Objects3DIntPopulation(ImageHandler.wrap(imgFill));
-        imhDots.closeImagePlus();
-        closeImages(imgFill);
-        closeImages(imgDotsDraw);
-        return(Arrays.asList(popIn, popOut));  
+    private Objects3DIntPopulation getPopFromImage(ImagePlus img) {
+        ImageLabeller labeller = new ImageLabeller();
+        ImageInt labels = labeller.getLabels(ImageHandler.wrap(img));
+        Objects3DIntPopulation pop = new Objects3DIntPopulation(labels);
+        labels.closeImagePlus();
+        return(pop);
     }
+    
+    
+    /**
+     * Remove objects in population with size < min and size > max
+     */
+    public void popFilterSize(Objects3DIntPopulation pop, double min, double max) {
+        pop.setVoxelSizeXY(cal.pixelWidth);
+        pop.setVoxelSizeZ(cal.pixelDepth);
+        pop.getObjects3DInt().removeIf(p -> (new MeasureVolume(p).getVolumeUnit() < min) || (new MeasureVolume(p).getVolumeUnit() > max));
+        pop.resetLabels();
+    }
+      
 
     /**
-     * Find sum vessel volume
+     * Detect dots
+     */
+    public Objects3DIntPopulation detectDots(ImagePlus imgIn, ArrayList<Roi> rois) {
+        ImagePlus imgDOG = DOG(imgIn, 1, 5);
+        ImagePlus imgBin = threshold(imgDOG, dotsThMethod);
+        imgBin.setCalibration(cal);
+        
+        // Fill ROIs in black
+        if (!rois.isEmpty())
+            fillImg(imgBin, rois);
+        
+        Objects3DIntPopulation dotsPop = getPopFromImage(imgBin);
+        System.out.println("Nb dots detected:"+dotsPop.getNbObjects());
+        popFilterSize(dotsPop, minDotsVol, Double.MAX_VALUE);
+        System.out.println("Nb dots remaining after size filtering: "+ dotsPop.getNbObjects());
+        
+        closeImage(imgDOG);
+        closeImage(imgBin);
+        
+        return(dotsPop);
+    }
+
+    
+    /**
+     * Difference of Gaussians filtering using CLIJ2
+     */ 
+    public ImagePlus DOG(ImagePlus img, double size1, double size2) {
+        ClearCLBuffer imgCL = clij2.push(img);
+        ClearCLBuffer imgCLDOG = clij2.create(imgCL);
+        clij2.differenceOfGaussian3D(imgCL, imgCLDOG, size1, size1, size1, size2, size2, size2);
+        ImagePlus imgDOG = clij2.pull(imgCLDOG);
+        clij2.release(imgCL);
+        clij2.release(imgCLDOG);
+        return(imgDOG);
+    }
+    
+    
+    /**
+     * Find dots inside and outside astrocytes
+     */
+    public List<Objects3DIntPopulation> findDotsInOutAstro(Objects3DIntPopulation dotsPop, Objects3DIntPopulation astroPop, ImagePlus imgDots) {
+        ImageHandler imhDots = ImageHandler.wrap(imgDots).createSameDimensions();
+        dotsPop.drawInImage(imhDots);
+        
+        ImageHandler imhDotsOut = imhDots.duplicate();
+        for (Object3DInt astro: astroPop.getObjects3DInt()) {
+            astro.drawObject(imhDotsOut, 0);
+        }
+        Objects3DIntPopulation popOut = new Objects3DIntPopulation(imhDotsOut);
+        
+        ImagePlus imgSub = new ImageCalculator().run("subtract stack create", imhDots.getImagePlus(), imhDotsOut.getImagePlus());
+        Objects3DIntPopulation popIn = new Objects3DIntPopulation(ImageHandler.wrap(imgSub));
+        
+        imhDots.closeImagePlus();
+        imhDotsOut.closeImagePlus();
+        return(Arrays.asList(popIn, popOut));  
+    }
+    
+    /**
+     * Compute ROIs total volume
+     */
+    public double getRoisVolume(ArrayList<Roi> rois, ImagePlus img) {
+        double roisVol = 0;
+        for(Roi roi: rois) {
+            PolygonRoi poly = new PolygonRoi(roi.getFloatPolygon(), Roi.FREEROI);
+            poly.setLocation(0, 0);
+            
+            img.resetRoi();
+            img.setRoi(poly);
+
+            ResultsTable rt = new ResultsTable();
+            Analyzer analyzer = new Analyzer(img, Analyzer.AREA, rt);
+            analyzer.measure();
+            roisVol += rt.getValue("Area", 0);
+        }
+
+        return(roisVol * img.getNSlices() * cal.pixelDepth);
+    }
+    
+    
+    /**
+     * Find total volume of objects in population
      */
     public double findPopVolume(Objects3DIntPopulation pop) {
         DoubleAccumulator sumVol = new DoubleAccumulator(Double::sum,0.d);
@@ -483,6 +455,37 @@ public class Tools {
             sumVol.accumulate(new MeasureVolume(obj).getVolumeUnit());
         });
         return(sumVol.doubleValue());
+    }
+    
+    
+    /**
+     * Draw results
+     */
+    public void drawResults(Objects3DIntPopulation astroPop, Objects3DIntPopulation dotsInAstroPop, Objects3DIntPopulation dotsOutAstroPop, 
+            ImagePlus imgAstro, ImagePlus imgDots, String name) {
+        ImageHandler imhAstro = ImageHandler.wrap(imgAstro).createSameDimensions();
+        ImageHandler imhDotsIn = imhAstro.createSameDimensions();
+        ImageHandler imhDotsOut = imhAstro.createSameDimensions();
+        
+        // Draw astro pop in blue, dotsIn pop in red and dotsOut pop in green
+        for (Object3DInt astro: astroPop.getObjects3DInt()) 
+            astro.drawObject(imhAstro, 255);
+        for (Object3DInt dot: dotsInAstroPop.getObjects3DInt()) 
+            dot.drawObject(imhDotsIn, 255);
+        for (Object3DInt dot: dotsOutAstroPop.getObjects3DInt()) 
+            dot.drawObject(imhDotsOut, 255);
+
+        ImagePlus[] imgColors = {imhDotsIn.getImagePlus(), imhDotsOut.getImagePlus(), imhAstro.getImagePlus(), imgDots, imgAstro};
+        ImagePlus imgObjects = new RGBStackMerge().mergeHyperstacks(imgColors, false);
+        imgObjects.setCalibration(cal);
+        IJ.run(imgObjects, "Enhance Contrast", "saturated=0.35");
+        
+        FileSaver ImgObjectsFile = new FileSaver(imgObjects);
+        ImgObjectsFile.saveAsTiff(name); 
+        
+        imhAstro.closeImagePlus();
+        imhDotsIn.closeImagePlus();
+        imhDotsOut.closeImagePlus();
     }
     
 }

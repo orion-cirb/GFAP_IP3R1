@@ -10,7 +10,7 @@
 	<version>1.0.0</version>
     <packaging>jar</packaging>
 	<name>plugins/CIRB/GFAP_IP3R1.jar</name>
-	<description>Analyze IP3R1 dost inside and outside astrocyte</description>
+	<description>Analyze IP3R1 dots inside and outside astrocytes</description>
 
 	<developers>
             <developer>
@@ -25,8 +25,8 @@
                 <timezone>-1</timezone>
             </developer>
               <developer>
-                <id>heloise</id>
-                <name>Heloïse Monnet</name>
+                <id>hm</id>
+                <name>Héloïse Monnet</name>
                 <email>heloise.monnet@college-de-france.fr</email>
                 <url></url>
                 <organization>CIRB, Collège de France</organization>
