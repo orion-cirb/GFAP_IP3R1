@@ -10,22 +10,24 @@
 3D images taken with a x60 objective
 
 2 channels:
-  1. GFAP astrocytes
-  2. IP3R1 
+  1. *Alexa Fluor 488:* GFAP astrocytes
+  2. *Alexa Fluor 647:* IP3R1 dots
 
-With each image could be provided *.zip , .roi* file containing one or multiple ROI(s).
+With each image can be provided a *.roi* or *.zip* file containing one or multiple ROI(s).
 
 ### Plugin description
 
-* Detect Astrocyte with DOG + Huang thresholding + median filtering
-* Detect IP3R1 dots with median and Triangle threshold
-* Detect dots inside and outside Astrocyte and processes
-* Compute volume astrocytes/processes, dots inside and outside
+* Detect GFAP astrocytes with median filtering + thresholding
+* Detect IP3R1 dots with DoG filtering + thresholding
+* Distinguish dots inside from dots outside astrocytes
+* Compute total volume of astrocytes and of each population of dots
+* If ROI(s) provided, remove from the analysis astrocytes and dots that are inside
 
 ### Dependencies
 
 * **3DImageSuite** Fiji plugin
+* **CLIJ2** Fiji plugin
 
 ### Version history
 
-Version 1 released on August 18, 2023.
+Version 1 released on August 24, 2023.
