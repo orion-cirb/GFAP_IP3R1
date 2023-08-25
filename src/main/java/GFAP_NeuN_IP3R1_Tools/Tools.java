@@ -1,5 +1,7 @@
-package GFAP_IP3R1_Tools;
+package GFAP_NeuN_IP3R1_Tools;
 
+import GFAP_NeuN_IP3R1_Tools.Cellpose.CellposeSegmentImgPlusAdvanced;
+import GFAP_NeuN_IP3R1_Tools.Cellpose.CellposeTaskSettings;
 import fiji.util.gui.GenericDialogPlus;
 import ij.IJ;
 import ij.ImagePlus;
@@ -48,13 +50,21 @@ public class Tools {
     
     private final CLIJ2 clij2 = CLIJ2.getInstance();
     
-    String[] chNames = {"GFAP astrocytes", "IP3R1 dots"};
+    String[] chNames = {"Cells", "IP3R1 dots"};
     public Calibration cal = new Calibration();
     public double pixVol;
     
     // Astrocytes detection
+    public boolean detectAstro = true;
     public String astroThMethod = "Triangle";
-    public double minAstroVol = 2;
+    
+    // Neurons detection (if detectAstro is false)
+    public String cellposeEnvDir = IJ.isWindows()? System.getProperty("user.home")+File.separator+"miniconda3"+File.separator+"envs"+File.separator+"CellPose" : "/opt/miniconda3/envs/cellpose";
+    public String cellposeModel = "cyto2";
+    public int cellposeDiam = 200;
+    public double cellposeStitchTh = 1;
+    
+    public double minCellVol = 2;
     
     // Dots detection
     public String dotsThMethod = "Otsu";
@@ -219,7 +229,7 @@ public class Tools {
      */
     public String[] dialog(String imagesDir, String[] channels) {
         GenericDialogPlus gd = new GenericDialogPlus("Parameters");
-        gd.setInsets​(0, 60, 0);
+        gd.setInsets​(0, 80, 0);
         gd.addImage(icon);
         
         gd.addMessage("Channels", Font.getFont("Monospace"), Color.blue);
@@ -230,9 +240,10 @@ public class Tools {
         }
         
         String[] thMethods = AutoThresholder.getMethods();
-        gd.addMessage("Astrocytes detection", Font.getFont("Monospace"), Color.blue);
-        gd.addChoice("Threshold method: ", thMethods, astroThMethod);
-        gd.addNumericField("Min volume (µm3): ", minAstroVol, 2);
+        gd.addMessage("Cells detection", Font.getFont("Monospace"), Color.blue);
+        gd.addCheckbox(" Detect astrocytes (otherwise neurons)", detectAstro);
+        gd.addChoice("Astro threshold method: ", thMethods, astroThMethod);
+        gd.addNumericField("Min volume (µm3): ", minCellVol, 2);
         
         gd.addMessage("Dots detection", Font.getFont("Monospace"), Color.blue);
         gd.addChoice("Threshold method: ", thMethods, dotsThMethod);
@@ -248,8 +259,9 @@ public class Tools {
         for (int n = 0; n < chChoices.length; n++) 
             chChoices[n] = gd.getNextChoice();
         
+        detectAstro = gd.getNextBoolean();
         astroThMethod = gd.getNextChoice();
-        minAstroVol = gd.getNextNumber();
+        minCellVol = gd.getNextNumber();
         
         dotsThMethod = gd.getNextChoice();
         minDotsVol = gd.getNextNumber();
@@ -274,26 +286,41 @@ public class Tools {
 
        
     /**
-     * Detect astrocytes
+     * Detect cells
      */
-    public Objects3DIntPopulation detectAstrocytes(ImagePlus imgIn, ArrayList<Roi> rois) {
-        ImagePlus imgMed = median2D(imgIn, 4);
-        ImagePlus imgBin = threshold(imgMed, astroThMethod);
-        imgBin.setCalibration(cal);
+    public Objects3DIntPopulation detectCells(ImagePlus imgIn, ArrayList<Roi> rois) {
+        ImagePlus imgOut;
+        if(detectAstro) {
+            ImagePlus imgMed = median2D(imgIn, 4);
+            imgOut = threshold(imgMed, astroThMethod);
+            closeImage(imgMed);
+        } else {
+            // Preprocessing
+            ImagePlus imgMed = median2D(imgIn, 2);
+
+            // Define CellPose settings
+            CellposeTaskSettings settings = new CellposeTaskSettings(cellposeModel, 1, cellposeDiam, cellposeEnvDir);
+            settings.setStitchThreshold(cellposeStitchTh);
+            settings.useGpu(true);
+
+            // Run Cellpose
+            CellposeSegmentImgPlusAdvanced cellpose = new CellposeSegmentImgPlusAdvanced(settings, imgMed);
+            imgOut = cellpose.run();
+            closeImage(imgMed);
+        }
+        imgOut.setCalibration(cal);
         
         // Fill ROIs in black
         if (!rois.isEmpty())
-            fillImg(imgBin, rois);
+            fillImg(imgOut, rois);
         
-        Objects3DIntPopulation astroPop = getPopFromImage(imgBin);
-        System.out.println("Nb astrocytic objects detected:"+astroPop.getNbObjects());
-        popFilterSize(astroPop, minAstroVol, Double.MAX_VALUE);
-        System.out.println("Nb astrocytic objects remaining after size filtering: "+ astroPop.getNbObjects());
+        Objects3DIntPopulation cellsPop = getPopFromImage(imgOut);
+        System.out.println("Nb cellular objects detected:"+cellsPop.getNbObjects());
+        popFilterSize(cellsPop, minCellVol, Double.MAX_VALUE);
+        System.out.println("Nb cellular objects remaining after size filtering: "+ cellsPop.getNbObjects());
         
-        closeImage(imgMed);
-        closeImage(imgBin);
-        
-        return(astroPop);
+        closeImage(imgOut);
+        return(cellsPop);
     }
     
     
@@ -406,13 +433,13 @@ public class Tools {
     /**
      * Find dots inside and outside astrocytes
      */
-    public List<Objects3DIntPopulation> findDotsInOutAstro(Objects3DIntPopulation dotsPop, Objects3DIntPopulation astroPop, ImagePlus imgDots) {
+    public List<Objects3DIntPopulation> findDotsInOutCells(Objects3DIntPopulation dotsPop, Objects3DIntPopulation cellsPop, ImagePlus imgDots) {
         ImageHandler imhDots = ImageHandler.wrap(imgDots).createSameDimensions();
         dotsPop.drawInImage(imhDots);
         
         ImageHandler imhDotsOut = imhDots.duplicate();
-        for (Object3DInt astro: astroPop.getObjects3DInt()) {
-            astro.drawObject(imhDotsOut, 0);
+        for (Object3DInt cell: cellsPop.getObjects3DInt()) {
+            cell.drawObject(imhDotsOut, 0);
         }
         Objects3DIntPopulation popOut = new Objects3DIntPopulation(imhDotsOut);
         
@@ -461,21 +488,21 @@ public class Tools {
     /**
      * Draw results
      */
-    public void drawResults(Objects3DIntPopulation astroPop, Objects3DIntPopulation dotsInAstroPop, Objects3DIntPopulation dotsOutAstroPop, 
-            ImagePlus imgAstro, ImagePlus imgDots, String name) {
-        ImageHandler imhAstro = ImageHandler.wrap(imgAstro).createSameDimensions();
-        ImageHandler imhDotsIn = imhAstro.createSameDimensions();
-        ImageHandler imhDotsOut = imhAstro.createSameDimensions();
+    public void drawResults(Objects3DIntPopulation cellsPop, Objects3DIntPopulation dotsInCellsPop, Objects3DIntPopulation dotsOutCellsPop, 
+            ImagePlus imgCells, ImagePlus imgDots, String name) {
+        ImageHandler imhCells = ImageHandler.wrap(imgCells).createSameDimensions();
+        ImageHandler imhDotsIn = imhCells.createSameDimensions();
+        ImageHandler imhDotsOut = imhCells.createSameDimensions();
         
-        // Draw astro pop in blue, dotsIn pop in red and dotsOut pop in green
-        for (Object3DInt astro: astroPop.getObjects3DInt()) 
-            astro.drawObject(imhAstro, 255);
-        for (Object3DInt dot: dotsInAstroPop.getObjects3DInt()) 
+        // Draw cells pop in blue, dotsIn pop in red and dotsOut pop in green
+        for (Object3DInt cell: cellsPop.getObjects3DInt()) 
+            cell.drawObject(imhCells, 255);
+        for (Object3DInt dot: dotsInCellsPop.getObjects3DInt()) 
             dot.drawObject(imhDotsIn, 255);
-        for (Object3DInt dot: dotsOutAstroPop.getObjects3DInt()) 
+        for (Object3DInt dot: dotsOutCellsPop.getObjects3DInt()) 
             dot.drawObject(imhDotsOut, 255);
 
-        ImagePlus[] imgColors = {imhDotsIn.getImagePlus(), imhDotsOut.getImagePlus(), imhAstro.getImagePlus(), imgDots, imgAstro};
+        ImagePlus[] imgColors = {imhDotsIn.getImagePlus(), imhDotsOut.getImagePlus(), imhCells.getImagePlus(), imgDots, imgCells};
         ImagePlus imgObjects = new RGBStackMerge().mergeHyperstacks(imgColors, false);
         imgObjects.setCalibration(cal);
         IJ.run(imgObjects, "Enhance Contrast", "saturated=0.35");
@@ -483,7 +510,7 @@ public class Tools {
         FileSaver ImgObjectsFile = new FileSaver(imgObjects);
         ImgObjectsFile.saveAsTiff(name); 
         
-        imhAstro.closeImagePlus();
+        imhCells.closeImagePlus();
         imhDotsIn.closeImagePlus();
         imhDotsOut.closeImagePlus();
     }

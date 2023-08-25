@@ -6,11 +6,11 @@
 	<modelVersion>4.0.0</modelVersion>
         
 	<groupId>orion-cirb</groupId>
-	<artifactId>GFAP_IP3R1</artifactId>
+	<artifactId>GFAP_NeuN_IP3R1</artifactId>
 	<version>1.0.0</version>
     <packaging>jar</packaging>
-	<name>plugins/CIRB/GFAP_IP3R1.jar</name>
-	<description>Analyze IP3R1 dots inside and outside astrocytes</description>
+	<name>plugins/CIRB/GFAP_NeuN_IP3R1.jar</name>
+	<description>Analyze IP3R1 dots inside and outside astrocytes or neurons</description>
 
 	<developers>
             <developer>

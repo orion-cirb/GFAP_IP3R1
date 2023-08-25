@@ -1,4 +1,4 @@
-import GFAP_IP3R1_Tools.Tools;
+import GFAP_NeuN_IP3R1_Tools.Tools;
 import ij.*;
 import ij.gui.Roi;
 import ij.plugin.PlugIn;
@@ -31,15 +31,15 @@ import org.apache.commons.lang.ArrayUtils;
 
 
 /**
-* Detect GFAP astrocytes with median filtering + thresholding
+* Detect GFAP astrocytes with median filtering + thresholding or NeuN neurons with Cellpose
 * Detect IP3R1 dots with DoG filtering + thresholding
-* Distinguish dots inside from dots outside astrocytes
-* Compute volume of astrocytes, dots inside and dots outside astrocytes
+* Distinguish dots inside from dots outside astrocytes or neurons
+* Compute volume of astrocytes/neurons, dots inside and dots outside astrocytes/neurons
 * @author Philippe Mailly & Héloïse Monnet
 */
-public class GFAP_IP3R1 implements PlugIn {
+public class GFAP_NeuN_IP3R1 implements PlugIn {
 
-    private GFAP_IP3R1_Tools.Tools tools = new Tools();
+    private GFAP_NeuN_IP3R1_Tools.Tools tools = new Tools();
        
     public void run(String arg) {
         try {
@@ -92,8 +92,12 @@ public class GFAP_IP3R1 implements PlugIn {
             // Write headers results for results files
             FileWriter fwResults = new FileWriter(outDirResults + "Results.xls", false);
             BufferedWriter results = new BufferedWriter(fwResults);
-            results.write("Image name\tImage vol (µm3)\tImage-ROI vol (µm3)\tAstrocytes volume (µm3)\t"
+            if (tools.detectAstro)
+                results.write("Image name\tImage vol (µm3)\tImage-ROI vol (µm3)\tAstrocytes volume (µm3)\t"
                     + "IP3R1 dots volume inside astrocytes (µm3)\tIP3R1 dots volume outside astrocytes (µm3)\n");
+            else
+                results.write("Image name\tImage vol (µm3)\tImage-ROI vol (µm3)\tNeurons volume (µm3)\t"
+                    + "IP3R1 dots volume inside neurons (µm3)\tIP3R1 dots volume outside neurons (µm3)\n");
             results.flush();
             
             for (String f: imageFiles) {
@@ -118,11 +122,11 @@ public class GFAP_IP3R1 implements PlugIn {
                     Collections.addAll(rois, rm.getRoisAsArray());
                 }
                 
-                // Analyze GFAP astrocytes channel
-                tools.print("- Analyzing GFAP astrocytes channel -");
+                // Analyze cells channel
+                tools.print("- Analyzing cells channel -");
                 int indexCh = ArrayUtils.indexOf(channelNames, channels[0]);
-                ImagePlus imgAstro = BF.openImagePlus(options)[indexCh];
-                Objects3DIntPopulation astroPop = tools.detectAstrocytes(imgAstro, rois);
+                ImagePlus imgCells = BF.openImagePlus(options)[indexCh];
+                Objects3DIntPopulation cellsPop = tools.detectCells(imgCells, rois);
                 
                 // Analyze IP3R1 dots channel
                 tools.print("- Analyzing IP3R1 dots channel -");
@@ -130,28 +134,28 @@ public class GFAP_IP3R1 implements PlugIn {
                 ImagePlus imgDots = BF.openImagePlus(options)[indexCh];
                 Objects3DIntPopulation dotsPop = tools.detectDots(imgDots, rois);
                 
-                // Find dots inside and outside astrocytes
-                tools.print("- Finding dots inside and outside astrocytes -");
-                List<Objects3DIntPopulation> dotsInOutAstro = tools.findDotsInOutAstro(dotsPop, astroPop, imgDots);
-                Objects3DIntPopulation dotsInAstroPop = dotsInOutAstro.get(0);
-                Objects3DIntPopulation dotsOutAstroPop = dotsInOutAstro.get(1);
+                // Find dots inside and outside cells
+                tools.print("- Finding dots inside and outside cells -");
+                List<Objects3DIntPopulation> dotsInOutCells = tools.findDotsInOutCells(dotsPop, cellsPop, imgDots);
+                Objects3DIntPopulation dotsInCellsPop = dotsInOutCells.get(0);
+                Objects3DIntPopulation dotsOutCellsPop = dotsInOutCells.get(1);
                 
                 // Write results
                 tools.print("- Writing and drawing results -");
                 double imgVol = imgDots.getWidth() * imgDots.getHeight() * imgDots.getNSlices() * tools.pixVol;
                 double roisVol = tools.getRoisVolume(rois, imgDots);
-                results.write(rootName+"\t"+imgVol+"\t"+(imgVol-roisVol)+"\t"+tools.findPopVolume(astroPop)+"\t"+
-                        tools.findPopVolume(dotsInAstroPop)+"\t"+tools.findPopVolume(dotsOutAstroPop)+"\n");
+                results.write(rootName+"\t"+imgVol+"\t"+(imgVol-roisVol)+"\t"+tools.findPopVolume(cellsPop)+"\t"+
+                        tools.findPopVolume(dotsInCellsPop)+"\t"+tools.findPopVolume(dotsOutCellsPop)+"\n");
                 results.flush();
                 
                 // Draw results
-                tools.drawResults(astroPop, dotsInAstroPop, dotsOutAstroPop, imgAstro, imgDots, outDirResults+rootName+".tif");
+                tools.drawResults(cellsPop, dotsInCellsPop, dotsOutCellsPop, imgCells, imgDots, outDirResults+rootName+".tif");
                 tools.closeImage(imgDots);
-                tools.closeImage(imgAstro);
+                tools.closeImage(imgCells);
             }
             results.close();
         } catch (IOException | DependencyException | ServiceException | FormatException ex) {
-            Logger.getLogger(GFAP_IP3R1.class.getName()).log(Level.SEVERE, null, ex);
+            Logger.getLogger(GFAP_NeuN_IP3R1.class.getName()).log(Level.SEVERE, null, ex);
         }
         tools.print("All done!");
     }
