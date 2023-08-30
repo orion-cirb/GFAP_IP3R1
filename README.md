@@ -1,4 +1,4 @@
-# GFAP_Neun_IP3R1
+# GFAP_NeuN_IP3R1
 
 * **Developed for:** Anaïs
 * **Team:** Rouach
