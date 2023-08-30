@@ -1,4 +1,4 @@
-# GFAP_IP3R1
+# GFAP_Neun_IP3R1
 
 * **Developed for:** Anaïs
 * **Team:** Rouach
@@ -31,4 +31,4 @@ With each image can be provided a *.roi* or *.zip* file containing one or multip
 
 ### Version history
 
-Version 1 released on August 25, 2023.
+Version 1 released on August 30, 2023.
