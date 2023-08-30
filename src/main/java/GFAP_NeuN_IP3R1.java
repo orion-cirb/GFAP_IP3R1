@@ -90,7 +90,7 @@ public class GFAP_NeuN_IP3R1 implements PlugIn {
             }
             
             // Write headers results for results files
-            FileWriter fwResults = new FileWriter(outDirResults + "Results.xls", false);
+            FileWriter fwResults = new FileWriter(outDirResults + "Results.csv", false);
             BufferedWriter results = new BufferedWriter(fwResults);
             if (tools.detectAstro)
                 results.write("Image name\tImage vol (µm3)\tImage-ROI vol (µm3)\tAstrocytes volume (µm3)\t"

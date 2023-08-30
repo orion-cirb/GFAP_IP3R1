@@ -316,6 +316,7 @@ public class Tools {
         
         Objects3DIntPopulation cellsPop = getPopFromImage(imgOut);
         System.out.println("Nb cellular objects detected:"+cellsPop.getNbObjects());
+        popFilterOneZ(cellsPop);
         popFilterSize(cellsPop, minCellVol, Double.MAX_VALUE);
         System.out.println("Nb cellular objects remaining after size filtering: "+ cellsPop.getNbObjects());
         
@@ -378,6 +379,15 @@ public class Tools {
         Objects3DIntPopulation pop = new Objects3DIntPopulation(labels);
         labels.closeImagePlus();
         return(pop);
+    }
+    
+    
+    /**
+     * Remove objects in population with only one plan
+     */
+    public void popFilterOneZ(Objects3DIntPopulation pop) {
+        pop.getObjects3DInt().removeIf(p -> (p.getObject3DPlanes().size() == 1));
+        pop.resetLabels();
     }
     
     
