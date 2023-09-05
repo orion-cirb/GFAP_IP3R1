@@ -60,6 +60,7 @@ public class Tools {
     
     // Neurons detection (if detectAstro is false)
     public String cellposeEnvDir = IJ.isWindows()? System.getProperty("user.home")+File.separator+"miniconda3"+File.separator+"envs"+File.separator+"CellPose" : "/opt/miniconda3/envs/cellpose";
+    public final String cellposeModelPath = IJ.isWindows()? System.getProperty("user.home")+"\\.cellpose\\models\\" : "";
     public String cellposeModel = "cyto2_NeuN";
     public int cellposeDiam = 170;
     public double cellposeStitchTh = 1;
@@ -296,7 +297,7 @@ public class Tools {
             closeImage(imgMed);
         } else {
             // Define CellPose settings
-            CellposeTaskSettings settings = new CellposeTaskSettings(cellposeModel, 1, cellposeDiam, cellposeEnvDir);
+            CellposeTaskSettings settings = new CellposeTaskSettings(cellposeModelPath+cellposeModel, 1, cellposeDiam, cellposeEnvDir);
             settings.setStitchThreshold(cellposeStitchTh);
             settings.useGpu(true);
 
